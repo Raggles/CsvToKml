@@ -21,6 +21,7 @@ namespace CsvToKml
         public Folder PlacemarkFolder { get; set; }
         public Folder PathFolder { get; set; }
         public StyleMapCollection StyleMap { get; set; }
+        public StyleMapCollection StyleMapNoLabels { get; set; }
     }
 
     public class Link
@@ -30,9 +31,16 @@ namespace CsvToKml
         public Location Location2 { get; set; }
     }
     
+    public enum LabelMode
+    {
+        None,
+        All,
+        Some
+    }
+
     public class Map
     {
-        public bool NoLabels { get; set; } = false;
+        public LabelMode Labels { get; set; } = LabelMode.All;
         public Dictionary<string, Location> Locations { get; set; } = new Dictionary<string, Location>();
         public List<Link> Links { get; set; } = new List<Link>();
         private List<Color> _defaultColors = new List<Color>
@@ -211,12 +219,11 @@ namespace CsvToKml
             
             Folder root = new Folder() { Name = "Network" };
             d.AddFeature(root);
-            StyleMapCollection style_default = GenerateNewStyle("default", d);
+            StyleMapCollection style_default = GenerateNewStyle("default", d, null);
 
             List<string> folders = (from i in Locations.Values where !string.IsNullOrWhiteSpace(i.ParentName) select i.ParentName ).Distinct().ToList();
             foreach (var str in folders)
             {
-                StyleMapCollection styleMap = GenerateNewStyle(str.Sanitize(), d);
                 Folder fPlacemark = new Folder() { Name = str };
                 Folder fPath = new Folder() { Name = "Paths" };
                 root.AddFeature(fPlacemark);
@@ -230,7 +237,7 @@ namespace CsvToKml
                     Locations[str].PathFolder = fPath;
                     Locations[str].PlacemarkFolder = fPlacemark;
                 }
-                Locations[str].StyleMap = styleMap;
+                GenerateNewStyle(str.Sanitize(), d, Locations[str]);
             }
             foreach (var loc in Locations.Values)
             {
@@ -244,17 +251,46 @@ namespace CsvToKml
                     continue;
                 Placemark plPoint = new Placemark();
                 Placemark plPath = new Placemark();
+
                 if (loc.Parent != null)
                 {
-                    plPoint.StyleUrl = new Uri($"#msn_{loc.ParentName.Sanitize()}", UriKind.Relative);
+                    switch (Labels)
+                    {
+                        case LabelMode.All:
+                            plPoint.StyleUrl = new Uri($"#msn_{loc.ParentName.Sanitize()}", UriKind.Relative);
+                            break;
+                        case LabelMode.Some:
+                            if (IsImportant(loc.Name))
+                            {
+                                plPoint.StyleUrl = new Uri($"#msn_{loc.ParentName.Sanitize()}", UriKind.Relative);
+                            }
+                            else
+                            {
+                                plPoint.StyleUrl = new Uri($"#msn_{loc.ParentName.Sanitize()}_nolabels", UriKind.Relative);
+                            }
+                            break;
+                        case LabelMode.None:
+                            plPoint.StyleUrl = new Uri($"#msn_{loc.ParentName.Sanitize()}_nolabels", UriKind.Relative);
+                            break;
+                    }
+                    
                 }
                 else if (loc.StyleMap != null)
                 {
-                    plPoint.StyleUrl = new Uri($"#{loc.StyleMap.Id}", UriKind.Relative);
+                    switch (Labels)
+                    {
+                        case LabelMode.All:
+                        case LabelMode.Some:
+                            plPoint.StyleUrl = new Uri($"#{loc.StyleMap.Id}", UriKind.Relative);
+                            break;
+                        case LabelMode.None:
+                            plPoint.StyleUrl = new Uri($"#{loc.StyleMapNoLabels.Id}", UriKind.Relative);
+                            break;
+                    }
                 }
                 else
                 {
-                    plPoint.StyleUrl = new Uri($"#msn_default", UriKind.Relative);
+                    plPoint.StyleUrl = new Uri($"#{style_default.Id}", UriKind.Relative);
                 }
                 plPoint.Name = loc.Name;
                 plPoint.Geometry = new SharpKml.Dom.Point() { Coordinate = loc.Coordinates };
@@ -303,11 +339,21 @@ namespace CsvToKml
             File.WriteAllText(file, serializer.Xml);
         }
 
-        private StyleMapCollection GenerateNewStyle(string str, Feature feature)
+        private bool IsImportant(string name)
+        {
+            if (name.Contains(" ZS")) return true;
+            if (name.Contains(" SS")) return true;
+            if (name.Contains(" Gen")) return true;
+            if (name.Contains(" GXP")) return true;
+            return false;
+        }
+
+        private StyleMapCollection GenerateNewStyle(string str, Feature feature, Location loc)
         {
             Color32 c = GetRandomColor();
             StyleMapCollection stylemap = new StyleMapCollection();
-            Style s = new Style()
+            StyleMapCollection stylemap2 = new StyleMapCollection();
+            Style s_normal = new Style()
             {
                 Icon = new IconStyle
                 {
@@ -317,7 +363,24 @@ namespace CsvToKml
                 Id = $"sn_{str}",
                 Label = new LabelStyle()
                 {
-                    Scale = NoLabels ? 0.01 : 0.5
+                    Scale = 0.5
+                },
+                Line = new LineStyle()
+                {
+                    Color = new Color32(255 / 2, c.Blue, c.Green, c.Red)
+                }
+            };
+            Style s_nolabels = new Style()
+            {
+                Icon = new IconStyle
+                {
+                    Icon = new IconStyle.IconLink(new Uri("http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png")),
+                    Color = c
+                },
+                Id = $"sn_{str}_nolabels",
+                Label = new LabelStyle()
+                {
+                    Scale = 0.01
                 },
                 Line = new LineStyle()
                 {
@@ -339,12 +402,22 @@ namespace CsvToKml
                 Id = $"sn_{str}_highlight",
             };
             stylemap.Id = $"msn_{str}"; 
-            stylemap.Add(new Pair() { State = StyleState.Normal, StyleUrl = new Uri($"#{s.Id}", UriKind.Relative)});
+            stylemap.Add(new Pair() { State = StyleState.Normal, StyleUrl = new Uri($"#{s_normal.Id}", UriKind.Relative)});
             stylemap.Add(new Pair() { State = StyleState.Highlight, StyleUrl = new Uri($"#{s_highlight.Id}", UriKind.Relative)});
+            stylemap2.Id = $"msn_{str}_nolabels";
+            stylemap2.Add(new Pair() { State = StyleState.Normal, StyleUrl = new Uri($"#{s_nolabels.Id}", UriKind.Relative) });
+            stylemap2.Add(new Pair() { State = StyleState.Highlight, StyleUrl = new Uri($"#{s_highlight.Id}", UriKind.Relative) });
             feature.AddStyle(stylemap);
-            feature.AddStyle(s);
+            feature.AddStyle(stylemap2);
+            feature.AddStyle(s_normal);
+            feature.AddStyle(s_nolabels);
             feature.AddStyle(s_highlight);
-            return stylemap;
+            if (loc != null)
+            {
+                loc.StyleMap = stylemap;
+                loc.StyleMapNoLabels = stylemap2;
+            }
+            return Labels == LabelMode.All ? stylemap : stylemap2;
         }
 
         private Color32 GetRandomColor()

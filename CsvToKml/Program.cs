@@ -29,7 +29,9 @@ namespace CsvToKml
                         return;
                 }
                 m.ProduceKml(args[0] + ".kml");
-                m.NoLabels = true;
+                m.Labels = LabelMode.Some;
+                m.ProduceKml(args[0] + "_somelabels.kml");
+                m.Labels = LabelMode.None;
                 m.ProduceKml(args[0] + "_nolabels.kml");
             }
             catch (Exception ex)
