@@ -25,5 +25,6 @@ csvtokml file1 [file2]
 file1 can be either a csv list of locations, or an xml spreadsheet containing locations and links
 file2 is an optional csv list of links
 
-Two output files are generated, file1.kml and file1_nolabels.kml.
+Two output files are generated, file1.kml and file1_nolabels.kml.  Visualized in Google Earth, it looks like the following example:
 
+![Example Output](https://github.com/Raggles/CsvToKml/blob/master/examples/example.png?raw=true)
